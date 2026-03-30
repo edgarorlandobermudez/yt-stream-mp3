@@ -1,0 +1,46 @@
+# ─── Python ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pycache
+.Python
+
+# ─── Entornos virtuales ───────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+
+# ─── PyInstaller ──────────────────────────────────────────────────
+build/
+dist/
+*.spec.bak
+
+# ─── Descargas (MP3 generados) ────────────────────────────────────
+descargas/
+*.mp3
+
+# ─── Archivos temporales de yt-dlp ───────────────────────────────
+*.webm
+*.m4a
+*.part
+*.ytdl
+*.temp
+
+# ─── IDEs y editores ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── Sistema operativo ────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Logs ─────────────────────────────────────────────────────────
+*.log

@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🎵 yt-stream-mp3</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f12;
+      --surface: #1a1a22;
+      --card: #22222e;
+      --border: #2e2e3e;
+      --accent: #e53935;
+      --accent2: #ff6f61;
+      --text: #f0f0f5;
+      --muted: #8888aa;
+      --green: #4caf7d;
+      --radius: 12px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      padding: 20px 16px 60px;
+    }
+
+    header {
+      text-align: center;
+      padding: 32px 0 24px;
+    }
+    header h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.5px; }
+    header h1 span { color: var(--accent); }
+    header p { color: var(--muted); margin-top: 6px; font-size: .95rem; }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      max-width: 680px;
+      margin: 0 auto 20px;
+    }
+
+    label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: 6px; }
+
+    input[type="text"], input[type="number"], select {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 12px 14px;
+      font-size: 1rem;
+      outline: none;
+      transition: border .2s;
+    }
+    input[type="text"]:focus, input[type="number"]:focus, select:focus {
+      border-color: var(--accent);
+    }
+
+    .row { display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+    .row > div { flex: 1; min-width: 120px; }
+
+    .toggle-row {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 16px; color: var(--muted); font-size: .9rem;
+    }
+    .toggle {
+      width: 44px; height: 24px; background: var(--border);
+      border-radius: 12px; position: relative; cursor: pointer;
+      transition: background .2s; flex-shrink: 0;
+    }
+    .toggle.on { background: var(--accent); }
+    .toggle::after {
+      content: ""; position: absolute;
+      width: 18px; height: 18px; background: #fff; border-radius: 50%;
+      top: 3px; left: 3px; transition: left .2s;
+    }
+    .toggle.on::after { left: 23px; }
+
+    .btn {
+      margin-top: 20px; width: 100%; padding: 14px;
+      background: var(--accent); color: #fff;
+      border: none; border-radius: 8px; font-size: 1rem;
+      font-weight: 700; cursor: pointer; letter-spacing: .3px;
+      transition: opacity .2s, transform .1s;
+    }
+    .btn:active { transform: scale(.98); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn.downloading { background: #555; }
+
+    /* Progress */
+    #progress-section { display: none; }
+    .prog-header {
+      display: flex; justify-content: space-between;
+      font-size: .85rem; color: var(--muted); margin-bottom: 8px;
+    }
+    .prog-bar-bg {
+      background: var(--border); border-radius: 6px; height: 8px; overflow: hidden;
+    }
+    .prog-bar {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 6px; transition: width .3s ease;
+    }
+
+    /* Log */
+    #log {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px 14px; margin-top: 14px;
+      font-family: monospace; font-size: .82rem;
+      color: #aaa; max-height: 160px; overflow-y: auto;
+    }
+    #log .entry { padding: 2px 0; }
+    #log .entry.ok { color: var(--green); }
+    #log .entry.err { color: var(--accent); }
+
+    /* Files list */
+    #files-section h2 { font-size: 1.1rem; margin-bottom: 14px; }
+    .file-item {
+      display: flex; align-items: center; gap: 12px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px 14px; margin-bottom: 8px;
+    }
+    .file-icon { font-size: 1.4rem; flex-shrink: 0; }
+    .file-info { flex: 1; min-width: 0; }
+    .file-title {
+      font-weight: 600; font-size: .92rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .file-meta { font-size: .78rem; color: var(--muted); margin-top: 2px; }
+    .dl-btn {
+      background: var(--accent); color: #fff; border: none;
+      border-radius: 6px; padding: 7px 14px; font-size: .82rem;
+      font-weight: 700; cursor: pointer; flex-shrink: 0;
+      text-decoration: none; white-space: nowrap;
+    }
+
+    .folder-label {
+      font-size: .78rem; color: var(--accent2);
+      font-weight: 600; margin: 12px 0 6px;
+      text-transform: uppercase; letter-spacing: .5px;
+    }
+
+    .empty { text-align: center; color: var(--muted); padding: 32px 0; }
+
+    @media (max-width: 480px) {
+      header h1 { font-size: 1.5rem; }
+      .card { padding: 18px; }
+      .row { flex-direction: column; gap: 10px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🎵 yt-stream-<span>mp3</span></h1>
+  <p>Descarga audio de YouTube en MP3 — funciona en cualquier dispositivo</p>
+</header>
+
+<!-- Download form -->
+<div class="card">
+  <label for="url">URL de YouTube (video o playlist)</label>
+  <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" />
+
+  <div class="row">
+    <div>
+      <label for="quality">Calidad de audio</label>
+      <select id="quality">
+        <option value="64">64 kbps — Bajo</option>
+        <option value="128">128 kbps — Normal</option>
+        <option value="192" selected>192 kbps — Alta</option>
+        <option value="256">256 kbps — Muy alta</option>
+        <option value="320">320 kbps — Máxima</option>
+      </select>
+    </div>
+    <div>
+      <label for="limit">Límite de canciones</label>
+      <input id="limit" type="number" min="1" placeholder="Sin límite" />
+    </div>
+  </div>
+
+  <div class="toggle-row">
+    <div class="toggle on" id="folderToggle" onclick="toggleFolder()"></div>
+    <span>Crear subcarpeta por playlist</span>
+  </div>
+
+  <button class="btn" id="dlBtn" onclick="startDownload()">
+    ⬇ Descargar MP3
+  </button>
+</div>
+
+<!-- Progress -->
+<div class="card" id="progress-section">
+  <div class="prog-header">
+    <span id="prog-label">Iniciando…</span>
+    <span id="prog-pct">0%</span>
+  </div>
+  <div class="prog-bar-bg"><div class="prog-bar" id="prog-bar"></div></div>
+  <div id="log"></div>
+</div>
+
+<!-- Files -->
+<div class="card" id="files-section">
+  <h2>📁 Archivos descargados</h2>
+  <div id="files-list"><div class="empty">Aún no hay archivos</div></div>
+</div>
+
+<script>
+  const socket = io();
+  let folderEnabled = true;
+
+  function toggleFolder() {
+    folderEnabled = !folderEnabled;
+    document.getElementById('folderToggle').classList.toggle('on', folderEnabled);
+  }
+
+  function startDownload() {
+    const url = document.getElementById('url').value.trim();
+    if (!url) { alert('Ingresa una URL de YouTube'); return; }
+
+    const quality = document.getElementById('quality').value;
+    const limit = parseInt(document.getElementById('limit').value) || 0;
+
+    setDownloading(true);
+    clearLog();
+
+    document.getElementById('progress-section').style.display = 'block';
+    setProgress(0, 'Iniciando…');
+
+    socket.emit('start_download', {
+      url, quality, limit,
+      playlist_folder: folderEnabled
+    });
+  }
+
+  socket.on('log', d => addLog(d.msg));
+  socket.on('error', d => { addLog('❌ ' + d.msg, 'err'); setDownloading(false); });
+
+  socket.on('progress_init', d => {
+    setProgress(0, `Preparando ${d.total} canción(es)…`);
+  });
+
+  socket.on('track_start', d => {
+    addLog(`⬇ [${d.index}/${d.total}] descargando…`);
+    setProgress(0, `Canción ${d.index} de ${d.total}`);
+  });
+
+  socket.on('progress', d => {
+    setProgress(d.pct, `[${d.index}/${d.total}] ${d.pct}%  —  ${d.speed_kb} KB/s`);
+  });
+
+  socket.on('track_done', d => {
+    addLog(`✅ ${d.artist} - ${d.title} (${d.size_mb} MB)`, 'ok');
+    loadFiles();
+  });
+
+  socket.on('done', () => {
+    setProgress(100, '¡Descarga completa!');
+    setDownloading(false);
+    loadFiles();
+  });
+
+  // UI helpers
+  function setDownloading(active) {
+    const btn = document.getElementById('dlBtn');
+    btn.disabled = active;
+    btn.textContent = active ? '⏳ Descargando…' : '⬇ Descargar MP3';
+    btn.classList.toggle('downloading', active);
+  }
+
+  function setProgress(pct, label) {
+    document.getElementById('prog-bar').style.width = pct + '%';
+    document.getElementById('prog-pct').textContent = pct + '%';
+    document.getElementById('prog-label').textContent = label;
+  }
+
+  function addLog(msg, cls = '') {
+    const log = document.getElementById('log');
+    const d = document.createElement('div');
+    d.className = 'entry ' + cls;
+    d.textContent = msg;
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function clearLog() {
+    document.getElementById('log').innerHTML = '';
+  }
+
+  // Load file list
+  async function loadFiles() {
+    const res = await fetch('/files');
+    const files = await res.json();
+    const container = document.getElementById('files-list');
+
+    if (!files.length) {
+      container.innerHTML = '<div class="empty">Aún no hay archivos</div>';
+      return;
+    }
+
+    // Group by folder
+    const groups = {};
+    files.forEach(f => {
+      const key = f.folder || '📂 Raíz';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(f);
+    });
+
+    container.innerHTML = '';
+    for (const [folder, items] of Object.entries(groups)) {
+      if (Object.keys(groups).length > 1) {
+        const lbl = document.createElement('div');
+        lbl.className = 'folder-label';
+        lbl.textContent = '📂 ' + folder;
+        container.appendChild(lbl);
+      }
+      items.forEach(f => {
+        const parts = f.name.replace('.mp3', '').split(' - ');
+        const artist = parts.length > 1 ? parts[0] : '';
+        const title = parts.length > 1 ? parts.slice(1).join(' - ') : f.name.replace('.mp3','');
+
+        const item = document.createElement('div');
+        item.className = 'file-item';
+        item.innerHTML = `
+          <div class="file-icon">🎵</div>
+          <div class="file-info">
+            <div class="file-title">${escHtml(title)}</div>
+            <div class="file-meta">${escHtml(artist)}${artist ? ' · ' : ''}${f.size_mb} MB</div>
+          </div>
+          <a class="dl-btn" href="/download/${encodeURI(f.path)}" download>⬇ Guardar</a>
+        `;
+        container.appendChild(item);
+      });
+    }
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // Load files on start
+  loadFiles();
+</script>
+</body>
+</html>

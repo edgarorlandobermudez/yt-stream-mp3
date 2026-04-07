@@ -44,3 +44,9 @@ desktop.ini
 
 # ─── Logs ─────────────────────────────────────────────────────────
 *.log
+
+# ─── Agentes internos y skills (solo locales) ─────────────────────
+.github/agents/
+.github/skills/
+internal-agents/
+memories/

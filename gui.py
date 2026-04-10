@@ -14,7 +14,12 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
 # Motor de descarga
-from yt_mp3 import _parse_artist_title, _safe_filename, _write_id3_tags
+from yt_mp3 import (
+    _cleanup_temp_source_files,
+    _parse_artist_title,
+    _safe_filename,
+    _write_id3_tags,
+)
 import yt_dlp
 
 try:
@@ -139,6 +144,7 @@ def run_download(url, quality, limit, playlist_folder, output_dir,
 
             tmp_mp3.rename(new_path)
             _write_id3_tags(new_path, entry, idx if is_playlist else None)
+            _cleanup_temp_source_files(output_dir, video_id)
 
             size_mb = round(new_path.stat().st_size / 1_048_576, 1)
             on_track_done(artist, title, size_mb, str(new_path))
@@ -293,6 +299,15 @@ class App(ctk.CTk):
             text_color=TEXT, font=ctk.CTkFont(size=12, weight="bold"))
         self.prog_pct.grid(row=0, column=1, sticky="e")
 
+        self.clear_log_btn = ctk.CTkButton(
+            prog_top, text="🧹 Limpiar historial (log)",
+            width=132, height=26,
+            fg_color=SURFACE, hover_color=BORDER, text_color=TEXT,
+            border_width=1, border_color=BORDER,
+            font=ctk.CTkFont(size=11),
+            command=self._clear_log)
+        self.clear_log_btn.grid(row=0, column=2, padx=(10, 0), sticky="e")
+
         self.prog_bar = ctk.CTkProgressBar(
             prog_frame, progress_color=ACCENT,
             fg_color=BORDER, height=8)
@@ -324,6 +339,19 @@ class App(ctk.CTk):
                       fg_color=SURFACE, hover_color=BORDER,
                       text_color=TEXT, border_width=1, border_color=BORDER,
                       command=self._load_files).grid(row=0, column=1)
+        ctk.CTkButton(
+            files_hdr,
+            text="🗑 Eliminar archivos descargados",
+            width=140,
+            height=28,
+            fg_color=SURFACE,
+            hover_color=BORDER,
+            text_color=TEXT,
+            border_width=1,
+            border_color=BORDER,
+            font=ctk.CTkFont(size=11),
+            command=self._clear_files_history,
+        ).grid(row=0, column=2, padx=(8, 0))
 
         self.files_scroll = ctk.CTkScrollableFrame(
             files_outer, fg_color="transparent", corner_radius=0)
@@ -457,6 +485,56 @@ class App(ctk.CTk):
             title  = parts[1] if len(parts) > 1 else mp3.stem
             size_mb = round(mp3.stat().st_size / 1_048_576, 1)
             self._add_file_row(artist, title, size_mb, str(mp3), row=i)
+
+    def _clear_files_history(self):
+        """Elimina MP3 de la carpeta de salida y recarga la lista."""
+        if self._downloading:
+            messagebox.showinfo(
+                "Descarga en curso",
+                "Espera a que termine la descarga para eliminar archivos.",
+            )
+            return
+
+        files = list(self._output_dir.rglob("*.mp3"))
+        if not files:
+            messagebox.showinfo(
+                "Sin archivos",
+                "No hay archivos en el historial para eliminar.",
+            )
+            return
+
+        confirm = messagebox.askyesno(
+            "Eliminar archivos descargados",
+            (
+                f"Se eliminarán {len(files)} archivo(s) MP3 de:\n"
+                f"{self._output_dir}\n\n"
+                "¿Deseas continuar?"
+            ),
+        )
+        if not confirm:
+            return
+
+        removed = 0
+        errors = 0
+        for mp3 in files:
+            try:
+                mp3.unlink()
+                removed += 1
+            except OSError:
+                errors += 1
+
+        self._load_files()
+        self._append_log(
+            f"🗑 Archivos eliminados: {removed} archivo(s)"
+        )
+        if errors:
+            messagebox.showwarning(
+                "Limpieza incompleta",
+                (
+                    f"Se eliminaron {removed} archivo(s), "
+                    f"pero {errors} no pudieron eliminarse."
+                ),
+            )
 
     def _add_file_row(self, artist: str, title: str, size_mb: float,
                       path: str, row: int = None):

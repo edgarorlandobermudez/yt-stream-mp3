@@ -189,6 +189,29 @@ def _rename_and_tag(
     return new_path
 
 
+def _cleanup_temp_source_files(output_dir: Path, video_id: str) -> None:
+    """Elimina archivos temporales del id descargado (ej. .webm, .m4a)."""
+    if not video_id:
+        return
+
+    removable_suffixes = {
+        ".webm",
+        ".m4a",
+        ".mp4",
+        ".opus",
+        ".part",
+        ".temp",
+    }
+
+    for temp_file in output_dir.glob(f"{video_id}.*"):
+        if temp_file.suffix.lower() in removable_suffixes:
+            try:
+                temp_file.unlink()
+            except OSError:
+                # No interrumpir el flujo si no se puede borrar un temporal.
+                pass
+
+
 def download(
     urls: list[str],
     output_dir: Path,
@@ -257,7 +280,13 @@ def download(
             else:
                 dest_dir = output_dir
 
-            final_path = _rename_and_tag(tmp_mp3, dest_dir, entry, idx if is_playlist else None)
+            _rename_and_tag(
+                tmp_mp3,
+                dest_dir,
+                entry,
+                idx if is_playlist else None,
+            )
+            _cleanup_temp_source_files(output_dir, video_id)
             artist, title = _parse_artist_title(entry)
             print(f"  🎧  [{idx}/{effective}] {artist} - {title}.mp3")
             ok += 1

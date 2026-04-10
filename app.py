@@ -15,7 +15,13 @@ from flask import Flask, render_template, send_from_directory, jsonify, request,
 from flask_socketio import SocketIO, emit
 
 # Importar helpers de yt_mp3
-from yt_mp3 import _parse_artist_title, _safe_filename, _write_id3_tags, _TITLE_NOISE
+from yt_mp3 import (
+    _cleanup_temp_source_files,
+    _parse_artist_title,
+    _safe_filename,
+    _write_id3_tags,
+    _TITLE_NOISE,
+)
 import yt_dlp
 
 try:
@@ -37,6 +43,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # Bloqueo simple para evitar descargas simultáneas
 _download_lock = threading.Lock()
+_stop_event = threading.Event()
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +70,56 @@ def list_files():
     return jsonify(files)
 
 
+@app.route("/files/clear", methods=["POST"])
+def clear_files():
+    """Elimina todos los MP3 descargados (recursivo)."""
+    removed = 0
+    errors = 0
+    for mp3 in DOWNLOADS_DIR.rglob("*.mp3"):
+        try:
+            mp3.unlink()
+            removed += 1
+        except OSError:
+            errors += 1
+
+    return jsonify({"removed": removed, "errors": errors})
+
+
+@app.route("/files/delete", methods=["POST"])
+def delete_file():
+    """Elimina un MP3 específico por ruta relativa dentro de descargas."""
+    data = request.get_json(silent=True) or {}
+    rel_path = (data.get("path") or "").strip()
+    if not rel_path:
+        return jsonify({"error": "path requerido"}), 400
+
+    target = Path(rel_path)
+    if (
+        ".." in target.parts
+        or target.is_absolute()
+        or target.suffix.lower() != ".mp3"
+    ):
+        return jsonify({"error": "path inválido"}), 400
+
+    full_path = DOWNLOADS_DIR / target
+    if not full_path.exists():
+        return jsonify({"error": "archivo no encontrado"}), 404
+
+    try:
+        full_path.unlink()
+    except OSError:
+        return jsonify({"error": "no se pudo eliminar"}), 500
+
+    return jsonify({"deleted": rel_path})
+
+
+@app.route("/download/stop", methods=["POST"])
+def stop_download_http():
+    """Solicita detener la descarga activa."""
+    _stop_event.set()
+    return jsonify({"stopping": True})
+
+
 @app.route("/download/<path:filepath>")
 def download_file(filepath):
     """Sirve el MP3 para descarga."""
@@ -87,6 +144,7 @@ def handle_download(data: dict):
     quality = data.get("quality", "192")
     limit = int(data.get("limit") or 0) or None
     playlist_folder = bool(data.get("playlist_folder", True))
+    full_playlist = bool(data.get("full_playlist", True))
 
     if not url:
         emit("error", {"msg": "URL vacía."})
@@ -96,11 +154,27 @@ def handle_download(data: dict):
         emit("error", {"msg": "Ya hay una descarga en progreso. Espera a que termine."})
         return
 
+    stopped = False
+    _stop_event.clear()
     try:
-        _run_download(url, quality, limit, playlist_folder)
+        stopped = _run_download(
+            url,
+            quality,
+            limit,
+            playlist_folder,
+            full_playlist,
+        )
+    except Exception as exc:  # pragma: no cover - error inesperado en runtime
+        emit("error", {"msg": f"Error inesperado: {exc}"})
     finally:
         _download_lock.release()
-        emit("done", {})
+        emit("done", {"stopped": bool(stopped)})
+
+
+@socketio.on("stop_download")
+def handle_stop_download():
+    """Marca la descarga actual para detenerse."""
+    _stop_event.set()
 
 
 def _emit(event: str, data: dict):
@@ -109,29 +183,62 @@ def _emit(event: str, data: dict):
 
 def _count_playlist(url: str) -> int:
     opts = {"quiet": True, "extract_flat": True, "ignoreerrors": True}
+
+    def _count_match_filter(_info, *, incomplete=False):
+        if _stop_event.is_set():
+            raise yt_dlp.utils.DownloadCancelled("Detenida por el usuario")
+        return None
+
+    opts["match_filter"] = _count_match_filter
+
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False) or {}
         return len(info.get("entries") or [])
 
 
-def _run_download(url: str, quality: str, limit: int | None, playlist_folder: bool):
+def _run_download(
+    url: str,
+    quality: str,
+    limit: int | None,
+    playlist_folder: bool,
+    full_playlist: bool,
+):
+    if _stop_event.is_set():
+        _emit("log", {"msg": "⏹ Descarga detenida por el usuario"})
+        return True
+
     _emit("log", {"msg": f"🔍 Analizando URL…"})
 
-    total = _count_playlist(url)
-    is_playlist = total > 1
-    effective = min(total, limit) if (limit and total) else (total or 1)
+    if full_playlist:
+        try:
+            total = _count_playlist(url)
+        except yt_dlp.utils.DownloadCancelled:
+            _emit("log", {"msg": "⏹ Descarga detenida por el usuario"})
+            return True
+
+        is_playlist = total > 1
+        effective = min(total, limit) if (limit and total) else (total or 1)
+    else:
+        total = 1
+        is_playlist = False
+        effective = 1
 
     if is_playlist:
         suffix = " (limitado)" if limit and limit < total else ""
         _emit("log", {"msg": f"📋 Playlist: {effective} canciones{suffix}"})
     else:
         _emit("log", {"msg": "🎵 Video individual detectado"})
+        if not full_playlist:
+            _emit("log", {"msg": "🔢 Modo índice: solo se descargará el video del enlace"})
 
     _emit("progress_init", {"total": effective})
 
     current: dict = {"index": 0, "last_file": None}
 
     def progress_hook(d: dict):
+        if _stop_event.is_set():
+            raise yt_dlp.utils.DownloadCancelled("Detenida por el usuario")
+
         if d["status"] == "downloading":
             fname = d.get("filename")
             if fname and fname != current["last_file"]:
@@ -164,21 +271,38 @@ def _run_download(url: str, quality: str, limit: int | None, playlist_folder: bo
         "no_warnings": True,
         "ignoreerrors": True,
     }
+
+    def _match_filter(_info, *, incomplete=False):
+        if _stop_event.is_set():
+            raise yt_dlp.utils.DownloadCancelled("Detenida por el usuario")
+        return None
+
+    opts["match_filter"] = _match_filter
+
     if limit:
         opts["playlistend"] = limit
+    if not full_playlist:
+        opts["noplaylist"] = True
 
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True) or {}
+    except yt_dlp.utils.DownloadCancelled:
+        _emit("log", {"msg": "⏹ Descarga detenida por el usuario"})
+        return True
     except yt_dlp.utils.DownloadError as exc:
         _emit("error", {"msg": str(exc)})
-        return
+        return False
 
     entries = info.get("entries") if is_playlist else [info]
     entries = [e for e in (entries or []) if e]
 
     ok = 0
     for idx, entry in enumerate(entries, start=1):
+        if _stop_event.is_set():
+            _emit("log", {"msg": "⏹ Descarga detenida por el usuario"})
+            return True
+
         video_id = entry.get("id", "")
         tmp_mp3 = DOWNLOADS_DIR / f"{video_id}.mp3"
         if not tmp_mp3.exists():
@@ -204,6 +328,7 @@ def _run_download(url: str, quality: str, limit: int | None, playlist_folder: bo
 
         tmp_mp3.rename(new_path)
         _write_id3_tags(new_path, entry, idx if is_playlist else None)
+        _cleanup_temp_source_files(DOWNLOADS_DIR, video_id)
 
         rel_path = str(new_path.relative_to(DOWNLOADS_DIR))
         _emit("track_done", {
@@ -219,6 +344,7 @@ def _run_download(url: str, quality: str, limit: int | None, playlist_folder: bo
     msg = (f"🎉 Playlist completa: {ok}/{effective} canciones"
            if is_playlist else f"🎧 Descarga completada: {ok} archivo(s)")
     _emit("log", {"msg": msg})
+    return False
 
 
 # ---------------------------------------------------------------------------

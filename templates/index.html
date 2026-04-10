@@ -94,6 +94,41 @@
     .btn:disabled { opacity: .5; cursor: not-allowed; }
     .btn.downloading { background: #555; }
 
+    .btn-stop {
+      margin-top: 10px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+
+    .btn-stop:not(:disabled):hover {
+      border-color: var(--accent);
+      color: #fff;
+      background: rgba(229, 57, 53, 0.12);
+    }
+
+    .stop-fab {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 9999;
+      border: 1px solid var(--accent2);
+      background: var(--accent);
+      color: #fff;
+      border-radius: 999px;
+      padding: 12px 16px;
+      font-size: .9rem;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, .45);
+      display: none;
+    }
+
+    .stop-fab:disabled {
+      opacity: .7;
+      cursor: not-allowed;
+    }
+
     /* Progress */
     #progress-section { display: none; }
     .prog-header {
@@ -110,9 +145,20 @@
     }
 
     /* Log */
+    .log-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: 14px;
+    }
+    .clear-btn {
+      background: none; border: 1px solid var(--border);
+      color: var(--muted); border-radius: 6px;
+      padding: 3px 10px; font-size: .75rem; cursor: pointer;
+      transition: border-color .2s, color .2s;
+    }
+    .clear-btn:hover { border-color: var(--accent); color: var(--accent); }
     #log {
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: 8px; padding: 12px 14px; margin-top: 14px;
+      border-radius: 8px; padding: 12px 14px; margin-top: 6px;
       font-family: monospace; font-size: .82rem;
       color: #aaa; max-height: 160px; overflow-y: auto;
     }
@@ -139,6 +185,32 @@
       border-radius: 6px; padding: 7px 14px; font-size: .82rem;
       font-weight: 700; cursor: pointer; flex-shrink: 0;
       text-decoration: none; white-space: nowrap;
+    }
+
+    .file-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .delete-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-size: 1.1rem;
+      line-height: 1;
+      cursor: pointer;
+      transition: border-color .2s, color .2s, background .2s;
+    }
+
+    .delete-btn:hover {
+      border-color: var(--accent);
+      color: #fff;
+      background: rgba(229, 57, 53, 0.18);
     }
 
     .folder-label {
@@ -190,10 +262,26 @@
     <span>Crear subcarpeta por playlist</span>
   </div>
 
+  <div class="toggle-row">
+    <div
+      class="toggle on"
+      id="fullPlaylistToggle"
+      onclick="toggleFullPlaylist()"
+    ></div>
+    <span>Descargar playlist completa</span>
+  </div>
+
   <button class="btn" id="dlBtn" onclick="startDownload()">
     ⬇ Descargar MP3
   </button>
+  <button class="btn btn-stop" id="stopBtn" onclick="stopDownload()" disabled>
+    ⏹ Detener descarga
+  </button>
 </div>
+
+<button id="stopFab" class="stop-fab" onclick="stopDownload()" disabled>
+  ⏹ Detener ahora
+</button>
 
 <!-- Progress -->
 <div class="card" id="progress-section">
@@ -202,6 +290,14 @@
     <span id="prog-pct">0%</span>
   </div>
   <div class="prog-bar-bg"><div class="prog-bar" id="prog-bar"></div></div>
+</div>
+
+<!-- Log / Historial -->
+<div class="card">
+  <div class="log-header">
+    <span style="font-size:.9rem;font-weight:600">📋 Historial</span>
+    <button class="clear-btn" onclick="clearDownloadedFiles()">🗑 Eliminar archivos descargados</button>
+  </div>
   <div id="log"></div>
 </div>
 
@@ -214,10 +310,17 @@
 <script>
   const socket = io();
   let folderEnabled = true;
+  let fullPlaylistEnabled = true;
 
   function toggleFolder() {
     folderEnabled = !folderEnabled;
     document.getElementById('folderToggle').classList.toggle('on', folderEnabled);
+  }
+
+  function toggleFullPlaylist() {
+    fullPlaylistEnabled = !fullPlaylistEnabled;
+    document.getElementById('fullPlaylistToggle')
+      .classList.toggle('on', fullPlaylistEnabled);
   }
 
   function startDownload() {
@@ -235,7 +338,8 @@
 
     socket.emit('start_download', {
       url, quality, limit,
-      playlist_folder: folderEnabled
+      playlist_folder: folderEnabled,
+      full_playlist: fullPlaylistEnabled
     });
   }
 
@@ -260,7 +364,13 @@
     loadFiles();
   });
 
-  socket.on('done', () => {
+  socket.on('done', d => {
+    if (d && d.stopped) {
+      setProgress(0, 'Descarga detenida');
+      setDownloading(false);
+      loadFiles();
+      return;
+    }
     setProgress(100, '¡Descarga completa!');
     setDownloading(false);
     loadFiles();
@@ -269,9 +379,31 @@
   // UI helpers
   function setDownloading(active) {
     const btn = document.getElementById('dlBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const stopFab = document.getElementById('stopFab');
     btn.disabled = active;
     btn.textContent = active ? '⏳ Descargando…' : '⬇ Descargar MP3';
     btn.classList.toggle('downloading', active);
+    stopBtn.disabled = !active;
+    stopFab.disabled = !active;
+    stopFab.textContent = '⏹ Detener ahora';
+    stopFab.style.display = active ? 'inline-flex' : 'none';
+  }
+
+  async function stopDownload() {
+    socket.emit('stop_download');
+    try {
+      await fetch('/download/stop', { method: 'POST' });
+    } catch (_) {
+      // Si falla HTTP, igual queda el intento por socket
+    }
+
+    const stopBtn = document.getElementById('stopBtn');
+    const stopFab = document.getElementById('stopFab');
+    stopBtn.disabled = true;
+    stopFab.disabled = true;
+    stopFab.textContent = '⏳ Deteniendo…';
+    addLog('⏹ Solicitando detener descarga…');
   }
 
   function setProgress(pct, label) {
@@ -291,6 +423,50 @@
 
   function clearLog() {
     document.getElementById('log').innerHTML = '';
+  }
+
+  async function clearDownloadedFiles() {
+    const ok = confirm('Se eliminarán todos los MP3 descargados. ¿Deseas continuar?');
+    if (!ok) return;
+
+    try {
+      const res = await fetch('/files/clear', { method: 'POST' });
+      if (!res.ok) {
+        throw new Error('No se pudo eliminar archivos');
+      }
+
+      const data = await res.json();
+      addLog(`🗑 Archivos eliminados: ${data.removed}`, 'ok');
+      if (data.errors) {
+        addLog(`⚠ No se pudieron eliminar ${data.errors} archivo(s)`, 'err');
+      }
+      await loadFiles();
+    } catch (err) {
+      addLog('❌ Error al eliminar archivos descargados', 'err');
+    }
+  }
+
+  async function deleteOneFile(path) {
+    const ok = confirm(`¿Eliminar este archivo?\n${path}`);
+    if (!ok) return;
+
+    try {
+      const res = await fetch('/files/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'No se pudo eliminar el archivo');
+      }
+
+      addLog(`🗑 Archivo eliminado: ${path}`, 'ok');
+      await loadFiles();
+    } catch (err) {
+      addLog(`❌ Error al eliminar: ${path}`, 'err');
+    }
   }
 
   // Load file list
@@ -333,7 +509,15 @@
             <div class="file-title">${escHtml(title)}</div>
             <div class="file-meta">${escHtml(artist)}${artist ? ' · ' : ''}${f.size_mb} MB</div>
           </div>
-          <a class="dl-btn" href="/download/${encodeURI(f.path)}" download>⬇ Guardar</a>
+          <div class="file-actions">
+            <a class="dl-btn" href="/download/${encodeURI(f.path)}" download>⬇ Guardar</a>
+            <button
+              class="delete-btn"
+              title="Eliminar archivo"
+              aria-label="Eliminar archivo"
+              onclick='deleteOneFile(${JSON.stringify(f.path)})'
+            >✕</button>
+          </div>
         `;
         container.appendChild(item);
       });

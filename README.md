@@ -47,8 +47,15 @@ Luego abre en tu navegador:
 - Pegar URL de YouTube (video o playlist)
 - Seleccionar calidad de audio
 - Limitar número de canciones de playlist
+- Elegir modo de descarga:
+	- **Descargar playlist completa**
+	- **Descargar solo el video del enlace** (útil con URL que trae `index=`)
 - Barra de progreso en tiempo real
-- Lista de archivos descargados con botón **⬇ Guardar**
+- Botón **⏹ Detener descarga** (normal y flotante)
+- Lista de archivos descargados con:
+	- **⬇ Guardar**
+	- **✕ Eliminar archivo individual**
+- Botón **🗑 Eliminar archivos descargados** para limpiar todo
 
 ---
 
@@ -65,6 +72,16 @@ python3 yt_mp3.py https://www.youtube.com/watch?v=WcIcVapfqXw
 ```bash
 python3 yt_mp3.py "https://www.youtube.com/playlist?list=PLxxxxxx"
 ```
+
+### URL con playlist + índice (descargar solo esa canción)
+
+En la **interfaz web**, desactiva **Descargar playlist completa** y usa la URL con `index`, por ejemplo:
+
+```text
+https://www.youtube.com/watch?v=xnKhsTXoKCI&list=PLenUrOlreSp6EXV4PJWLEvLIdnacjn-2w&index=1
+```
+
+Así descargará solo el video apuntado por ese enlace.
 
 ### Radio Mix / Auto-playlist de YouTube
 
@@ -156,6 +173,21 @@ yt-stream-mp3/
 
 ## ⚠️ Notas
 
-- Los archivos MP3 se guardan con el **título del video** como nombre de archivo.
-- Si `ffmpeg` no está instalado, la conversión a MP3 **no funcionará**.
+- Los archivos MP3 se guardan con nombre limpio y metadatos (artista/título) cuando están disponibles.
+- Los temporales de descarga (por ejemplo `.webm`, `.m4a`, `.opus`) se eliminan al finalizar la conversión.
+- Si YouTube bloquea un video por derechos de autor, la app mostrará error y ese video no podrá descargarse.
 - Respetar los términos de uso de YouTube. Usar solo para contenido con licencia libre o de uso personal.
+
+---
+
+## 🧩 Problemas frecuentes
+
+### 1) El botón detener no responde de inmediato en playlists largas
+
+- Usa el botón **⏹ Detener ahora** (flotante) para interrumpir el proceso aunque estés haciendo scroll.
+- Si acabas de actualizar código, reinicia la app y recarga el navegador con **Ctrl+F5**.
+
+### 2) Mensaje "Video unavailable... blocked on copyright grounds"
+
+- Es una restricción de YouTube para ese contenido específico.
+- No es un error del botón ni del borrado local.
